@@ -25,13 +25,38 @@ pub enum Instruction {
 
 impl From<u16> for Instruction {
     fn from(value: u16) -> Self {
+        // Zero-operand instructions
         match value {
-            0 => Instruction::ZeroOp(ZeroOp::Halt),
-            1 => Instruction::ZeroOp(ZeroOp::Wait),
-            5 => Instruction::ZeroOp(ZeroOp::Reset),
-            0o240 => Instruction::ZeroOp(ZeroOp::Nop),
-            _ => todo!(),
+            0 => return Instruction::ZeroOp(ZeroOp::Halt),
+            1 => return Instruction::ZeroOp(ZeroOp::Wait),
+            5 => return Instruction::ZeroOp(ZeroOp::Reset),
+            0o240 => return Instruction::ZeroOp(ZeroOp::Nop),
+            _ => {}
         }
+
+        // One-operand instructions
+        let opcode = (value >> 6) & 0b111111111;
+        let byte_or_word: Size = (value >> 15).into();
+        let addr: PdpAddress = (value & 0b111111).into();
+        match opcode {
+            0o003 => return OneOp::Swab.make_instruction(addr),
+            0o050 => return OneOp::Clr(byte_or_word).make_instruction(addr),
+            0o051 => return OneOp::Com(byte_or_word).make_instruction(addr),
+            0o052 => return OneOp::Inc(byte_or_word).make_instruction(addr),
+            0o053 => return OneOp::Dec(byte_or_word).make_instruction(addr),
+            0o054 => return OneOp::Neg(byte_or_word).make_instruction(addr),
+            0o055 => return OneOp::Adc(byte_or_word).make_instruction(addr),
+            0o056 => return OneOp::Sbc(byte_or_word).make_instruction(addr),
+            0o057 => return OneOp::Tst(byte_or_word).make_instruction(addr),
+            0o060 => return OneOp::Ror(byte_or_word).make_instruction(addr),
+            0o061 => return OneOp::Rol(byte_or_word).make_instruction(addr),
+            0o062 => return OneOp::Asr(byte_or_word).make_instruction(addr),
+            0o063 => return OneOp::Asl(byte_or_word).make_instruction(addr),
+            0o067 => return OneOp::Sxt.make_instruction(addr),
+            _ => {}
+        }
+
+        Instruction::ZeroOp(ZeroOp::Halt)
     }
 }
 
@@ -48,6 +73,22 @@ pub struct PdpAddress {
     mode: Mode,
     reg: Register,
 }
+impl PdpAddress {
+    fn is_pc(&self) -> bool {
+        self.reg == Register::R7
+    }
+}
+
+impl From<u16> for PdpAddress {
+    fn from(value: u16) -> Self {
+        let reg = value & 0b111;
+        let mode = (value >> 3) & 0b111;
+        Self {
+            mode: mode.into(),
+            reg: reg.into(),
+        }
+    }
+}
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Register {
@@ -61,13 +102,42 @@ pub enum Register {
     R7,
 }
 
+impl From<u16> for Register {
+    fn from(value: u16) -> Self {
+        match value {
+            0 => Self::R0,
+            1 => Self::R1,
+            2 => Self::R2,
+            3 => Self::R3,
+            4 => Self::R4,
+            5 => Self::R5,
+            6 => Self::R6,
+            7 => Self::R7,
+            _ => panic!("invalid register {value}"),
+        }
+    }
+}
+
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
-pub struct Operand(u16);
+pub enum Operand {
+    None,
+    NextWord,
+}
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Size {
     Byte,
     Word,
+}
+
+impl From<u16> for Size {
+    fn from(value: u16) -> Self {
+        match value {
+            0 => Self::Word,
+            1 => Self::Byte,
+            _ => panic!("not a size value {value}"),
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
@@ -86,6 +156,20 @@ pub enum OneOp {
     Asl(Size),
     Swab,
     Sxt,
+}
+
+impl OneOp {
+    fn make_instruction(self, addr: PdpAddress) -> Instruction {
+        Instruction::OneOp {
+            op: self,
+            addr,
+            operand: if addr.is_pc() {
+                Operand::NextWord
+            } else {
+                Operand::None
+            },
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
@@ -152,9 +236,25 @@ pub enum Mode {
     AutoIncrement,         // if R7 = Immediate
     AutoIncrementIndirect, // if R7 = aboslute indirect
     AutoDecrement,
-    AutoDecrentIndirect,
+    AutoDecrementIndirect,
     Index,         // if R7 = relative direct
     IndexIndirect, // if R7 = relative indirect
+}
+
+impl From<u16> for Mode {
+    fn from(value: u16) -> Self {
+        match value {
+            0 => Self::Register,
+            1 => Self::RegisterIndirect,
+            2 => Self::AutoIncrement,
+            3 => Self::AutoIncrementIndirect,
+            4 => Self::AutoDecrement,
+            5 => Self::AutoDecrementIndirect,
+            6 => Self::Index,
+            7 => Self::IndexIndirect,
+            _ => panic!("invalid register {value}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -174,5 +274,42 @@ mod test {
 
         let nop: Instruction = 0o000240u16.into();
         assert_eq!(Instruction::ZeroOp(ZeroOp::Nop), nop);
+    }
+
+    #[test]
+    fn test_address_decode() {
+        let addr: PdpAddress = 0u16.into();
+        assert_eq!(
+            PdpAddress {
+                mode: Mode::Register,
+                reg: Register::R0
+            },
+            addr
+        );
+
+        let addr: PdpAddress = 0b101100u16.into();
+        assert_eq!(
+            PdpAddress {
+                mode: Mode::AutoDecrementIndirect,
+                reg: Register::R4
+            },
+            addr
+        );
+    }
+
+    #[test]
+    fn test_decode_clr() {
+        let inst: Instruction = 0o005023.into();
+        assert_eq!(
+            Instruction::OneOp {
+                op: OneOp::Clr(Size::Word),
+                addr: PdpAddress {
+                    mode: Mode::AutoIncrement,
+                    reg: Register::R3
+                },
+                operand: Operand::None
+            },
+            inst
+        );
     }
 }
