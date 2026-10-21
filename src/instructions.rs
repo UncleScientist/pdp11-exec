@@ -1,5 +1,7 @@
 // https://www.teach.cs.toronto.edu/~ajr/258/pdp11.pdf
 
+use std::fmt::Display;
+
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Instruction {
     ZeroOp(ZeroOp),
@@ -18,9 +20,35 @@ pub enum Instruction {
         op: TwoOp,
         src: PdpAddress,
         dst: PdpAddress,
+        src_operand: Operand,
+        dst_operand: Operand,
     },
     Branch(Branch),
     Jump(Jump),
+}
+
+impl Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::ZeroOp(zero_op) => todo!(),
+            Instruction::OneOp { op, addr, operand } => todo!(),
+            Instruction::RegOp {
+                op,
+                reg,
+                addr,
+                operand,
+            } => todo!(),
+            Instruction::TwoOp {
+                op,
+                src,
+                dst,
+                src_operand,
+                dst_operand,
+            } => todo!(),
+            Instruction::Branch(branch) => todo!(),
+            Instruction::Jump(jump) => todo!(),
+        }
+    }
 }
 
 impl From<u16> for Instruction {
@@ -53,6 +81,40 @@ impl From<u16> for Instruction {
             0o062 => return OneOp::Asr(byte_or_word).make_instruction(addr),
             0o063 => return OneOp::Asl(byte_or_word).make_instruction(addr),
             0o067 => return OneOp::Sxt.make_instruction(addr),
+            _ => {}
+        }
+
+        // one-and-a-half operand instructions
+        let opcode = (value >> 9) & 0b1111111;
+        let reg: Register = ((value >> 6) & 0b111).into();
+        let addr: PdpAddress = (value & 0b111111).into();
+        match opcode {
+            0o070 => return RegOp::Mul.make_instruction(reg, addr),
+            0o071 => return RegOp::Div.make_instruction(reg, addr),
+            0o072 => return RegOp::Ash.make_instruction(reg, addr),
+            0o073 => return RegOp::Ashc.make_instruction(reg, addr),
+            0o074 => return RegOp::Xor.make_instruction(reg, addr),
+            _ => {}
+        }
+
+        // two-operand instructions
+        let opcode = (value >> 12) & 0b0111;
+        let byte_or_word: Size = (value >> 15).into();
+        let src: PdpAddress = ((value >> 6) & 0b111111).into();
+        let dst: PdpAddress = (value & 0b111111).into();
+        match opcode {
+            0o1 => return TwoOp::Mov(byte_or_word).make_instruction(src, dst),
+            0o2 => return TwoOp::Mov(byte_or_word).make_instruction(src, dst),
+            0o3 => return TwoOp::Mov(byte_or_word).make_instruction(src, dst),
+            0o4 => return TwoOp::Mov(byte_or_word).make_instruction(src, dst),
+            0o5 => return TwoOp::Mov(byte_or_word).make_instruction(src, dst),
+            0o6 => {
+                if (value >> 15) == 0 {
+                    return TwoOp::Add.make_instruction(src, dst);
+                } else {
+                    return TwoOp::Sub.make_instruction(src, dst);
+                }
+            }
             _ => {}
         }
 
@@ -181,6 +243,21 @@ pub enum RegOp {
     Xor,
 }
 
+impl RegOp {
+    fn make_instruction(self, reg: Register, addr: PdpAddress) -> Instruction {
+        Instruction::RegOp {
+            op: self,
+            reg,
+            addr,
+            operand: if addr.is_pc() {
+                Operand::NextWord
+            } else {
+                Operand::None
+            },
+        }
+    }
+}
+
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum TwoOp {
     Mov(Size),
@@ -190,6 +267,26 @@ pub enum TwoOp {
     Bis(Size),
     Bic(Size),
     Bit(Size),
+}
+
+impl TwoOp {
+    fn make_instruction(self, src: PdpAddress, dst: PdpAddress) -> Instruction {
+        Instruction::TwoOp {
+            op: self,
+            src,
+            dst,
+            src_operand: if src.is_pc() {
+                Operand::NextWord
+            } else {
+                Operand::None
+            },
+            dst_operand: if dst.is_pc() {
+                Operand::NextWord
+            } else {
+                Operand::None
+            },
+        }
+    }
 }
 
 pub type Offset = u8;
@@ -308,6 +405,36 @@ mod test {
                     reg: Register::R3
                 },
                 operand: Operand::None
+            },
+            inst
+        );
+
+        let inst: Instruction = 0o105023.into();
+        assert_eq!(
+            Instruction::OneOp {
+                op: OneOp::Clr(Size::Byte),
+                addr: PdpAddress {
+                    mode: Mode::AutoIncrement,
+                    reg: Register::R3
+                },
+                operand: Operand::None
+            },
+            inst
+        );
+    }
+
+    #[test]
+    fn test_decode_mul() {
+        let inst: Instruction = 0o070711.into();
+        assert_eq!(
+            Instruction::RegOp {
+                op: RegOp::Mul,
+                reg: Register::R7,
+                addr: PdpAddress {
+                    mode: Mode::RegisterIndirect,
+                    reg: Register::R1,
+                },
+                operand: Operand::None,
             },
             inst
         );
