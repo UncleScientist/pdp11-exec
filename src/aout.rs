@@ -32,11 +32,11 @@ impl Memory {
         })
     }
 
-    pub fn get_instruction_at(&self, pc: usize) -> u16 {
+    pub fn get_word_at(&self, pc: usize) -> u16 {
         Self::get_word(&self.text, pc)
     }
 
-    fn get_word(data: &[u8], offset: usize) -> u16 {
+    pub fn get_word(data: &[u8], offset: usize) -> u16 {
         (data[offset + 1] as u16) << 8 | (data[offset] as u16)
     }
 }

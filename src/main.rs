@@ -1,6 +1,9 @@
 use std::{fs::File, io::BufReader};
 
-use crate::aout::Memory;
+use crate::{
+    aout::Memory,
+    instructions::{Instruction, Opcode},
+};
 
 mod aout;
 mod header;
@@ -16,8 +19,25 @@ fn main() {
 }
 
 fn execute(memory: Memory) {
-    println!("-- got here --");
-    println!("{:x?}", memory.get_instruction_at(0));
+    let mut offset = 0;
+    for _ in 0..10 {
+        let instr = Instruction::new(offset, &memory);
+        let words = instr.size();
+        print!("{offset:06o}: ");
+        print!("{:06o}", memory.get_word_at(offset));
+        if words > 2 {
+            print!(" {:06o}", memory.get_word_at(offset + 2));
+            if words > 4 {
+                print!(" {:06o}", memory.get_word_at(offset + 4));
+            } else {
+                print!("      ");
+            }
+        } else {
+            print!("             ");
+        }
+        println!(" | {instr}");
+        offset += words;
+    }
 }
 
 fn open_file(filename: &str) -> std::io::Result<Memory> {
